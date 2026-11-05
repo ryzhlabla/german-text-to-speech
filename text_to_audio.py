@@ -1,5 +1,7 @@
 """German text-to-speech app. Needs internet and: pip install -r requirements.txt"""
 import asyncio
+import ctypes
+import json
 import os
 import sys
 import threading
@@ -14,6 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 import edge_tts
+import requests
 from gtts import gTTS
 from PIL import Image
 
@@ -26,6 +29,11 @@ LOG_KEEP_DAYS = 30
 DEFAULT_AUDIO_NAME = "audio"
 DEFAULT_TEXT_NAME = "text"
 MICROSOFT_TRIES = 10  # the Microsoft server often drops connections, so keep trying
+# Telegram settings stay one folder above this project, so they are outside git
+TELEGRAM_FILE = APP_DIR.parent / "telegram_settings.json"
+TELEGRAM_URL = "https://api.telegram.org"
+TELEGRAM_TRIES = 3
+CAPTION_WORDS = 5
 # Yandex is switched off for now. To restore it, uncomment every Yandex line in this file
 # # The key stays one folder above this project, so it is outside git
 # KEY_FILE = APP_DIR.parent / "yandex_api_key.txt"
@@ -132,6 +140,95 @@ def voice_tips(voice):
         # raise YandexError(f"Yandex returned error {e.code}. Please try again later.") from None
 
 
+def mci(command):
+    """Send a command to the audio player built into Windows and return its answer."""
+    answer = ctypes.create_unicode_buffer(128)
+    error = ctypes.windll.winmm.mciSendStringW(command, answer, 128, None)
+    if error:
+        raise OSError(f"Windows audio error {error}")
+    return answer.value
+
+
+class TelegramError(Exception):
+    """A Telegram problem with a message the user can act on."""
+
+    def __init__(self, message, settings_problem=False):
+        super().__init__(message)
+        self.settings_problem = settings_problem
+
+
+def load_telegram_settings():
+    """Return the saved bot token and chat, or None if there is no token yet."""
+    try:
+        settings = json.loads(TELEGRAM_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return settings if settings.get("token") else None
+
+
+def save_telegram_settings(settings):
+    TELEGRAM_FILE.write_text(json.dumps(settings), encoding="utf-8")
+
+
+def telegram_caption(text):
+    """Return the first words of the text, followed by three dots."""
+    return " ".join(text.split()[:CAPTION_WORDS]).rstrip(".,;:!?-–…") + "..."
+
+
+def telegram_chat(chat):
+    """Accept @name, name, a t.me link or a number, and return what Telegram expects."""
+    chat = chat.strip().removeprefix("https://t.me/").removeprefix("t.me/")
+    if not chat or chat.startswith("@") or chat.lstrip("-").isdigit():
+        return chat
+    return f"@{chat}"
+
+
+def telegram_request(settings, method, **kwargs):
+    """Call the Telegram Bot API. The URL holds the token, so never log or show request errors."""
+    url = f"{TELEGRAM_URL}/bot{settings['token']}/{method}"
+    for attempt in range(1, TELEGRAM_TRIES + 1):
+        try:
+            response = requests.post(url, timeout=60, **kwargs)
+            break
+        except requests.RequestException as e:
+            log(f"Telegram try {attempt} of {TELEGRAM_TRIES} failed: {type(e).__name__}")
+            time.sleep(1)
+    else:
+        raise TelegramError("Could not reach Telegram. Check your internet and try again.")
+    try:
+        answer = response.json()
+    except ValueError:
+        answer = {}
+    if answer.get("ok"):
+        return answer["result"]
+    code, description = response.status_code, str(answer.get("description", ""))
+    log(f"Telegram error {code}: {description}")
+    if code in (401, 404):
+        raise TelegramError("Telegram did not accept the bot token. Please check it.", settings_problem=True)
+    if code == 403 or "chat" in description.lower():
+        raise TelegramError("Telegram could not use this chat. Check it, and that the bot is a member.", settings_problem=True)
+    raise TelegramError(f"Telegram returned error {code}. Please try again later.")
+
+
+def find_telegram_chat(settings):
+    """Return the latest chat that wrote to the bot."""
+    for update in reversed(telegram_request(settings, "getUpdates")):
+        message = update.get("message") or update.get("channel_post") or update.get("my_chat_member")
+        if message:
+            return message["chat"]["id"]
+    raise TelegramError("Send any message to your bot in Telegram, then press the Telegram button again.")
+
+
+def send_to_telegram(settings, audio_path, caption):
+    """Send the audio file with a short caption."""
+    if not settings["chat"]:
+        settings["chat"] = find_telegram_chat(settings)
+        save_telegram_settings(settings)
+    data = {"chat_id": settings["chat"], "caption": caption}
+    files = {"audio": (audio_path.name, audio_path.read_bytes(), "audio/mpeg")}
+    telegram_request(settings, "sendAudio", data=data, files=files)
+
+
 def make_audio(text, voice, path):
     """Create an mp3 file. Return its path and the service that made it."""
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -166,6 +263,8 @@ def main():
     root.grid_columnconfigure(0, weight=1)
     root.grid_rowconfigure(1, weight=1)  # only the text box grows with the window
     last_file = None
+    last_text = ""
+    playing = False
 
     def font(size, weight="normal"):
         return ctk.CTkFont(family="Segoe UI", size=size, weight=weight)
@@ -220,7 +319,7 @@ def main():
     settings.grid_columnconfigure((0, 1, 2), weight=1, uniform="settings")
     field_title(settings, "Voice").grid(row=0, column=0, sticky="w", padx=(16, 6), pady=(8, 0))
     field_title(settings, "Output audio name").grid(row=0, column=1, sticky="w", padx=6, pady=(8, 0))
-    field_title(settings, "Output text name").grid(row=0, column=2, sticky="w", padx=(6, 16), pady=(8, 0))
+    field_title(settings, "Output text name").grid(row=0, column=2, sticky="w", padx=6, pady=(8, 0))
     voice_box = ctk.CTkOptionMenu(
         settings, values=list(VOICES), command=show_tips, font=font(14), dropdown_font=font(14), height=36, corner_radius=10,
         fg_color=FIELD, text_color=TEXT, button_color=FIELD, button_hover_color=BORDER,
@@ -235,7 +334,15 @@ def main():
         return box
 
     audio_name_box = name_field(1, DEFAULT_AUDIO_NAME, 6)
-    text_name_box = name_field(2, DEFAULT_TEXT_NAME, (6, 14))
+    text_name_box = name_field(2, DEFAULT_TEXT_NAME, 6)
+    folder_image = ctk.CTkImage(
+        Image.open(ASSETS_DIR / "folder_light.png"), Image.open(ASSETS_DIR / "folder_dark.png"), size=(20, 20)
+    )
+    folder_button = ctk.CTkButton(
+        settings, text="", image=folder_image, width=36, height=36, corner_radius=10, fg_color=FIELD,
+        hover_color=BORDER, border_width=2, border_color=BORDER,
+    )
+    folder_button.grid(row=1, column=3, padx=(6, 14), pady=(0, 14))
 
     actions = ctk.CTkFrame(root, fg_color="transparent")
     actions.grid(row=4, column=0, sticky="ew", padx=20)
@@ -249,8 +356,14 @@ def main():
         hover_color=BORDER, border_width=1, border_color=BORDER, text_color=TEXT, text_color_disabled=MUTED,
     )
     play_button.grid(row=0, column=1)
+    telegram_image = ctk.CTkImage(Image.open(ASSETS_DIR / "telegram.png"), size=(28, 28))
+    telegram_button = ctk.CTkButton(
+        actions, text="", image=telegram_image, width=46, height=46, corner_radius=12, fg_color="transparent",
+        hover_color=BORDER, border_width=1, border_color=BORDER,
+    )
+    telegram_button.grid(row=0, column=2, padx=(10, 0))
     # yandex_button = ctk.CTkButton(actions, text="Add Yandex API", font=font(14), height=46, corner_radius=12)
-    # yandex_button.grid(row=0, column=2, padx=(10, 0))
+    # yandex_button.grid(row=0, column=3, padx=(10, 0))
 
     progress = ctk.CTkProgressBar(root, mode="indeterminate", height=4, progress_color=ACCENT, fg_color=BORDER)
     progress.grid(row=5, column=0, sticky="ew", padx=20, pady=(10, 0))
@@ -263,6 +376,8 @@ def main():
 
     def busy(active):
         run_button.configure(state="disabled" if active else "normal", text="Creating audio..." if active else "Run")
+        play_button.configure(state="normal" if last_file and not active else "disabled")
+        telegram_button.configure(state="disabled" if active else "normal")
         if active:
             progress.grid()
             progress.start()
@@ -273,8 +388,136 @@ def main():
     show_tips(voice_box.get())
     status("Enter German text and press Run.")
 
+    def ask_telegram_settings(old):
+        """Show a small window for the bot token and chat. Return the saved settings or None."""
+        dialog = ctk.CTkToplevel(root, fg_color=BACKGROUND)
+        dialog.title("Telegram settings")
+        dialog.geometry("480x330")
+        dialog.resizable(False, False)
+        dialog.transient(root)
+        dialog.grid_columnconfigure(0, weight=1)
+        saved = []
+
+        def entry_row(row, title, hint, value, **options):
+            field_title(dialog, title).grid(row=row, column=0, columnspan=2, sticky="w", padx=20, pady=(14, 0))
+            box = ctk.CTkEntry(dialog, font=font(14), height=36, corner_radius=10, fg_color=FIELD, text_color=TEXT, border_color=BORDER, **options)
+            box.insert(0, value)
+            box.grid(row=row + 1, column=0, columnspan=2, sticky="ew", padx=20)
+            ctk.CTkLabel(dialog, text=hint, font=font(12), text_color=MUTED, anchor="w", justify="left", wraplength=440).grid(
+                row=row + 2, column=0, columnspan=2, sticky="w", padx=20, pady=(2, 0)
+            )
+            return box
+
+        old = old or {"token": "", "chat": ""}
+        token_box = entry_row(0, "Bot token", "Create a bot with @BotFather in Telegram and paste its token here.", old["token"], show="*")
+        chat_box = entry_row(
+            3, "Channel or chat", "Channel: add the bot as an admin and enter @channelname.\n"
+            "Your own chat: leave this empty and send your bot any message first.", str(old["chat"]),
+        )
+
+        def save():
+            token = token_box.get().strip()
+            if token:
+                saved.append({"token": token, "chat": telegram_chat(chat_box.get())})
+                dialog.destroy()
+
+        ctk.CTkButton(
+            dialog, text="Cancel", font=font(14), height=38, corner_radius=10, fg_color="transparent", hover_color=BORDER,
+            border_width=1, border_color=BORDER, text_color=TEXT, command=dialog.destroy,
+        ).grid(row=6, column=0, sticky="e", padx=(20, 10), pady=(16, 16))
+        ctk.CTkButton(
+            dialog, text="Save", font=font(14, "bold"), height=38, corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color="white", command=save,
+        ).grid(row=6, column=1, sticky="e", padx=(0, 20), pady=(16, 16))
+        dialog.after(150, lambda: (dialog.lift(), dialog.focus_force(), token_box.focus(), dialog.grab_set()))
+        root.wait_window(dialog)
+        if not saved:
+            return None
+        save_telegram_settings(saved[0])
+        log("Telegram settings saved")
+        return saved[0]
+
+    def telegram_done(audio_path, error):
+        run_button.configure(state="normal")
+        telegram_button.configure(state="normal")
+        if not error:
+            status(f"Sent {audio_path.name} to Telegram.", SUCCESS)
+            return
+        status(str(error), ERROR)
+        if error.settings_problem and ask_telegram_settings(load_telegram_settings()):
+            status("Telegram settings saved. Press the Telegram button again.")
+
+    def telegram_work(settings, audio_path, caption):
+        try:
+            send_to_telegram(settings, audio_path, caption)
+            log(f"Sent {audio_path.name} to Telegram")
+            error = None
+        except TelegramError as e:
+            error = e
+        except Exception as e:
+            log(f"Telegram failed: {type(e).__name__}")
+            error = TelegramError("Could not send the audio to Telegram.")
+        root.after(0, telegram_done, audio_path, error)
+
+    def telegram_click():
+        if not last_file or not last_file.exists():
+            status("Press Run first to create the audio.", ERROR)
+            return
+        settings = load_telegram_settings() or ask_telegram_settings(None)
+        if not settings:
+            status("Nothing was sent.")
+            return
+        run_button.configure(state="disabled")
+        telegram_button.configure(state="disabled")
+        status("Sending to Telegram...")
+        args = (settings, last_file, telegram_caption(last_text))
+        threading.Thread(target=telegram_work, args=args, daemon=True).start()
+
+    def open_output_folder():
+        try:
+            OUTPUT_DIR.mkdir(exist_ok=True)
+            os.startfile(OUTPUT_DIR)
+        except OSError as e:
+            log(f"Could not open the output folder: {e}")
+            status("Could not open the output folder.", ERROR)
+
+    def stop_audio():
+        nonlocal playing
+        if playing:
+            playing = False
+            play_button.configure(text="Play")
+            mci("close voice")  # this also frees the file, so it can be overwritten
+
+    def check_audio():
+        """Switch the button back to Play when the audio reaches its end."""
+        if playing:
+            if mci("status voice mode") == "stopped":
+                stop_audio()
+            else:
+                root.after(200, check_audio)
+
+    def toggle_audio():
+        nonlocal playing
+        if playing:
+            stop_audio()
+            return
+        try:
+            mci(f'open "{last_file}" type mpegvideo alias voice')
+            mci("play voice")
+        except OSError as e:
+            log(f"Play failed: {e}")
+            status("Could not play the audio file.", ERROR)
+            try:
+                mci("close voice")
+            except OSError:
+                pass  # the file was never opened
+            return
+        playing = True
+        play_button.configure(text="Stop")
+        check_audio()
+
     def finish(result, text_path, error):
-        nonlocal last_file
+        nonlocal last_file, last_text
         busy(False)
         if error:
             message = "Could not create audio. Check your internet and try again."
@@ -284,6 +527,7 @@ def main():
             status(message, ERROR)
             return
         last_file, service = result
+        last_text = text_path.read_text(encoding="utf-8")
         play_button.configure(state="normal")
         status(f"Saved: {last_file.name} and {text_path.name} in the output folder ({service} voice)", SUCCESS)
 
@@ -340,6 +584,7 @@ def main():
         if not overwrite_allowed([audio_path, text_path]):
             status("Nothing was changed.")
             return
+        stop_audio()
         busy(True)
         status("Creating audio...")
         threading.Thread(target=work, args=(text, voice, audio_path, text_path), daemon=True).start()
@@ -353,7 +598,9 @@ def main():
 
     run_button.configure(command=create)
     # yandex_button.configure(command=add_yandex_key)
-    play_button.configure(command=lambda: os.startfile(last_file))
+    play_button.configure(command=toggle_audio)
+    folder_button.configure(command=open_output_folder)
+    telegram_button.configure(command=telegram_click)
     root.mainloop()
 
 

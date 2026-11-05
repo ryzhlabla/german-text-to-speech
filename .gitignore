@@ -1,6 +1,7 @@
 output/
 __pycache__/
 yandex_api_key.txt
+telegram_settings.json
 Log/
 .venv/
 build/

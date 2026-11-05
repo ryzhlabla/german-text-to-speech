@@ -8,15 +8,26 @@ A small Windows app that turns German text into a voice message. Type your text,
 2. Type or paste your German text.
 3. Choose a voice: Katja, Amala, Conrad or Killian.
 4. Enter the output names. The defaults are `audio` and `text`.
-5. Press **Run**, then **Play** to listen.
+5. Press **Run**, then **Play** to listen inside the app. Press **Stop** to stop.
 
 The app follows the light or dark mode of Windows.
 
-Files are saved in the `output` folder next to the app, as `audio.mp3` and `text.txt`. If an output file already exists, the app asks before overwriting it. If a run fails, the old audio file is kept.
+Files are saved in the `output` folder next to the app, as `audio.mp3` and `text.txt`. The folder button next to the output names opens that folder. If an output file already exists, the app asks before overwriting it. If a run fails, the old audio file is kept.
 
 ## Voices
 
 The app uses free Microsoft voices through [edge-tts](https://github.com/rany2/edge-tts). It tries the Microsoft server up to 10 times. If that fails, it uses the Google voice through [gTTS](https://github.com/pndurette/gTTS), and the status line shows which service was used.
+
+## Telegram
+
+Press the Telegram button to send the last audio straight away. The message text is the first 5 words of your text, followed by `...`.
+
+The first time, the app asks for:
+
+- **Bot token:** create a bot with [@BotFather](https://t.me/BotFather) and paste its token.
+- **Channel or chat:** for a channel, add the bot as an admin and enter `@channelname`. For your own chat, leave it empty and send your bot any message first.
+
+These are saved in `telegram_settings.json`, one folder above this project, so they are not in git. If that folder is inside OneDrive, OneDrive also copies the file to the cloud. The token is stored as plain text, so don't share that file. To change the settings, delete that file. The app also asks again if Telegram rejects them.
 
 ## Yandex voice (switched off)
 

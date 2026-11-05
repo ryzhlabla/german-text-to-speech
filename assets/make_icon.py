@@ -23,6 +23,25 @@ def background():
     return gradient
 
 
+def folder_icon(color):
+    """Return a small folder picture for the open folder button."""
+    icon = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(icon)
+    draw.rounded_rectangle([40, 90, 250, 250], radius=44, fill=color)
+    draw.rounded_rectangle([40, 150, 472, 430], radius=48, fill=color)
+    return icon.resize((64, 64), Image.LANCZOS)
+
+
+def telegram_icon():
+    """Return a blue circle with a white paper plane."""
+    icon = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(icon)
+    draw.ellipse([0, 0, 1023, 1023], fill=(42, 171, 238))
+    wing = [(190, 505), (800, 255), (695, 775), (525, 650), (435, 745), (415, 590), (660, 395), (340, 565)]
+    draw.polygon(wing, fill="white")
+    return icon.resize((128, 128), Image.LANCZOS)
+
+
 def main():
     icon = background()
     draw = ImageDraw.Draw(icon)
@@ -36,6 +55,9 @@ def main():
     folder = Path(__file__).parent
     icon.resize((256, 256), Image.LANCZOS).save(folder / "icon.png")
     icon.save(folder / "icon.ico", sizes=ICO_SIZES)
+    folder_icon((95, 107, 122)).save(folder / "folder_light.png")
+    folder_icon((154, 165, 177)).save(folder / "folder_dark.png")
+    telegram_icon().save(folder / "telegram.png")
 
 
 if __name__ == "__main__":
