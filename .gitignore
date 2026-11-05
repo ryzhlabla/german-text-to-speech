@@ -1,0 +1,4 @@
+output/
+__pycache__/
+yandex_api_key.txt
+Log/
