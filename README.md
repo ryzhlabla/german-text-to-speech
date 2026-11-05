@@ -2,26 +2,17 @@
 
 A small Windows app that turns German text into a voice message. Type your text, choose a voice, press **Run**, and it saves an mp3 file and a text file.
 
-## Requirements
-
-- Python 3.12 with tkinter (included in the standard Windows installer)
-- An internet connection
-
-## Install
-
-```bash
-pip install edge-tts gTTS
-```
-
 ## Use
 
-1. Double-click `start.bat`, or run `python text_to_audio.py`.
+1. Double-click `German Text to Speech.exe`. It needs an internet connection, but no Python.
 2. Type or paste your German text.
 3. Choose a voice: Katja, Amala, Conrad or Killian.
 4. Enter the output names. The defaults are `audio` and `text`.
 5. Press **Run**, then **Play** to listen.
 
-Files are saved in the `output` folder as `audio.mp3` and `text.txt`. If an output file already exists, the app asks before overwriting it. If a run fails, the old audio file is kept.
+The app follows the light or dark mode of Windows.
+
+Files are saved in the `output` folder next to the app, as `audio.mp3` and `text.txt`. If an output file already exists, the app asks before overwriting it. If a run fails, the old audio file is kept.
 
 ## Voices
 
@@ -62,6 +53,22 @@ No official limit is documented. Long text is split automatically: into parts of
 ## Logs
 
 The app writes one log file per day to the `Log` folder, for example `2026-11-05.log`. Files older than 30 days are deleted when the app starts. Logs contain voices, file names, text lengths and errors, but never your text or API key. The `Log` folder is not added to git.
+
+## Development
+
+Needs Python 3.12 with tkinter (included in the standard Windows installer). Create the virtual environment once:
+
+```bash
+python -m venv .venv
+```
+
+```bash
+.venv\Scripts\python -m pip install -r requirements-dev.txt
+```
+
+- Run from source: double-click `start.bat`.
+- Build the app: double-click `build.bat`. It creates `German Text to Speech.exe` in this folder. The `.exe` is not added to git.
+- Change the icon: edit `assets/make_icon.py` and run it, then build again.
 
 ## License
 

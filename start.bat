@@ -1,1 +1,1 @@
-@start "" pythonw "%~dp0text_to_audio.py"
+@start "" "%~dp0.venv\Scripts\pythonw.exe" "%~dp0text_to_audio.py"

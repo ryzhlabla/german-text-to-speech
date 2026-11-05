@@ -1,29 +1,34 @@
-"""German text-to-speech with a small window. Needs internet and: pip install edge-tts gTTS"""
+"""German text-to-speech app. Needs internet and: pip install -r requirements.txt"""
 import asyncio
 import os
+import sys
 import threading
 import time
-import tkinter as tk
 # import urllib.error
 # import urllib.parse
 # import urllib.request
 from datetime import datetime
 from pathlib import Path
 # from tkinter import simpledialog
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 
+import customtkinter as ctk
 import edge_tts
 from gtts import gTTS
+from PIL import Image
 
-OUTPUT_DIR = Path(__file__).parent / "output"
-LOG_DIR = Path(__file__).parent / "Log"
+# In the .exe, __file__ points to a temporary folder, so saved files go next to the .exe instead
+APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+ASSETS_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "assets"
+OUTPUT_DIR = APP_DIR / "output"
+LOG_DIR = APP_DIR / "Log"
 LOG_KEEP_DAYS = 30
 DEFAULT_AUDIO_NAME = "audio"
 DEFAULT_TEXT_NAME = "text"
 MICROSOFT_TRIES = 10  # the Microsoft server often drops connections, so keep trying
 # Yandex is switched off for now. To restore it, uncomment every Yandex line in this file
 # # The key stays one folder above this project, so it is outside git
-# KEY_FILE = Path(__file__).parent.parent / "yandex_api_key.txt"
+# KEY_FILE = APP_DIR.parent / "yandex_api_key.txt"
 # YANDEX_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
 # YANDEX_VOICE = "lea"
 # YANDEX_MAX_CHARS = 5000
@@ -41,17 +46,24 @@ VOICE_PAUSES = {
     "Conrad (male)": ("0.2", "1.0", True),
     "Killian (male)": ("0.15", "0.9", False),
 }
-TIPS = """Tips for {voice}
-Short pause (about {short} s):  ,  ;  :  ...  or space + hyphen ( - ). Long dash –: {dash}
-Long pause (about {long} s):  .  !  ?  or a new line (Enter)
-Stress: "word" in quotes = light, word! = stronger (adds a long pause after it)
-Avoid: *word* and _word_. CAPITALS have almost no effect.
-Length: no official limit. Long text is split automatically into parts of 4096 bytes."""
-# YANDEX_TIPS = """Tips for Lea (female, Yandex)
-# Needs a Yandex API key: press Add Yandex API. Yandex is a paid service.
-# Pauses: use normal punctuation. Pause lengths were not measured for this voice.
-# Stress: the Yandex + mark works only for Russian, not for German.
-# Length: up to 5000 characters per message."""
+# Colors are (light mode, dark mode)
+BACKGROUND = ("#F3F5F7", "#14171C")
+CARD = ("#FFFFFF", "#1E2229")
+BORDER = ("#E2E6EB", "#2E343D")
+FIELD = ("#F8FAFB", "#262B33")
+TEXT = ("#1B2129", "#EDF0F3")
+MUTED = ("#5F6B7A", "#9AA5B1")
+ACCENT = ("#0F766E", "#0D9488")
+ACCENT_HOVER = ("#115E59", "#0F766E")
+SUCCESS = ("#0F766E", "#2DD4BF")
+ERROR = ("#B42318", "#F97066")
+# YANDEX_TIPS = [
+    # ("Key", "Needs a Yandex API key: press Add Yandex API. Yandex is a paid service."),
+    # ("Pauses", "Use normal punctuation. Pause lengths were not measured for this voice."),
+    # ("Stress", "The Yandex + mark works only for Russian, not for German."),
+    # ("Avoid", "Nothing known."),
+    # ("Length", "Up to 5000 characters per message."),
+# ]
 FIRST_TEXT = """Diese Herbstferien waren sehr schön.
 In der ersten Woche habe ich mit meiner Familie Berlin besucht. Wir haben eine Berlin-Discount-Karte gekauft, also haben wir fast alles gemacht: Wir sind mit dem Touristikbus gefahren, haben viele Museen besucht, sind mit dem Schiff gefahren und haben den berühmten Fernsehturm am Alexanderplatz besucht und mehr. Diese Reise war wirklich toll!
 In der zweiten Woche waren wir zu Hause, weil mein Mann arbeiten musste. Und am letzten Wochenende haben wir den Zoo in Osnabrück besucht."""
@@ -81,11 +93,17 @@ def delete_old_logs():
 
 
 def voice_tips(voice):
-    """Return the tips text for a voice name from the dropdown."""
+    """Return the tips for a voice name from the dropdown, as (title, text) rows."""
     # if voice not in VOICE_PAUSES:
         # return YANDEX_TIPS
     short, long, dash = VOICE_PAUSES[voice]
-    return TIPS.format(voice=voice, short=short, long=long, dash="short pause" if dash else "no pause")
+    return [
+        ("Short pause", f"About {short} s:  ,  ;  :  ...  or space + hyphen ( - ). Long dash –: {'short pause' if dash else 'no pause'}"),
+        ("Long pause", f"About {long} s:  .  !  ?  or a new line (Enter)"),
+        ("Stress", '"word" in quotes = light, word! = stronger (adds a long pause after it)'),
+        ("Avoid", "*word* and _word_. CAPITALS have almost no effect."),
+        ("Length", "No official limit. Long text is split automatically into parts of 4096 bytes."),
+    ]
 
 
 # class YandexError(Exception):
@@ -139,57 +157,135 @@ def make_audio(text, voice, path):
 def main():
     delete_old_logs()
     log("App started")
-    root = tk.Tk()
-    root.title("German Text to Voice")
-    root.geometry("560x540")
+    ctk.set_appearance_mode("system")
+    root = ctk.CTk(fg_color=BACKGROUND)
+    root.title("German Text to Speech")
+    root.iconbitmap(str(ASSETS_DIR / "icon.ico"))
+    root.geometry("660x800")
+    root.minsize(660, 700)
+    root.grid_columnconfigure(0, weight=1)
+    root.grid_rowconfigure(1, weight=1)  # only the text box grows with the window
     last_file = None
 
-    # Pack the bottom rows first, so the text box can never push them out of the window
-    status = tk.Label(root, text="Enter German text and press Run.", anchor="w")
-    status.pack(side="bottom", fill="x", padx=10, pady=8)
+    def font(size, weight="normal"):
+        return ctk.CTkFont(family="Segoe UI", size=size, weight=weight)
 
-    controls = tk.Frame(root)
-    controls.pack(side="bottom", fill="x", padx=10)
-    ttk.Label(controls, text="Voice:").grid(row=0, column=0, sticky="w", pady=2)
-    voice_box = ttk.Combobox(controls, values=list(VOICES), state="readonly", width=20)
-    voice_box.current(0)
-    voice_box.grid(row=0, column=1, sticky="w", padx=8, pady=2)
-    ttk.Label(controls, text="Output audio name:").grid(row=1, column=0, sticky="w", pady=2)
-    audio_name_box = ttk.Entry(controls, width=18)
-    audio_name_box.insert(0, DEFAULT_AUDIO_NAME)
-    audio_name_box.grid(row=1, column=1, sticky="w", padx=8, pady=2)
-    ttk.Label(controls, text="Output text name:").grid(row=2, column=0, sticky="w", pady=2)
-    text_name_box = ttk.Entry(controls, width=18)
-    text_name_box.insert(0, DEFAULT_TEXT_NAME)
-    text_name_box.grid(row=2, column=1, sticky="w", padx=8, pady=2)
-    run_button = ttk.Button(controls, text="Run")
-    run_button.grid(row=0, column=2, padx=8, pady=2)
-    play_button = ttk.Button(controls, text="Play", state="disabled")
-    play_button.grid(row=1, column=2, padx=8, pady=2)
-    # yandex_button = ttk.Button(controls, text="Add Yandex API")
-    # yandex_button.grid(row=2, column=2, padx=8, pady=2)
+    def card(row, expand=False):
+        frame = ctk.CTkFrame(root, fg_color=CARD, border_color=BORDER, border_width=1, corner_radius=14)
+        frame.grid(row=row, column=0, sticky="nsew" if expand else "ew", padx=20, pady=(0, 12))
+        return frame
 
-    tips = tk.Label(root, text=voice_tips(voice_box.get()), justify="left", anchor="w", wraplength=540)
-    tips.pack(side="bottom", fill="x", padx=10)
-    voice_box.bind("<<ComboboxSelected>>", lambda _: tips.config(text=voice_tips(voice_box.get())))
+    def field_title(parent, text):
+        return ctk.CTkLabel(parent, text=text, font=font(12, "bold"), text_color=MUTED, anchor="w")
 
-    text_box = tk.Text(root, wrap="word", font=("Segoe UI", 11), height=5)
-    text_box.pack(fill="both", expand=True, padx=10, pady=10)
+    header = ctk.CTkFrame(root, fg_color="transparent")
+    header.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 14))
+    logo = ctk.CTkImage(Image.open(ASSETS_DIR / "icon.png"), size=(46, 46))
+    ctk.CTkLabel(header, image=logo, text="").grid(row=0, column=0, rowspan=2, padx=(0, 12))
+    ctk.CTkLabel(header, text="German Text to Speech", font=font(21, "bold"), text_color=TEXT, anchor="w", height=28).grid(
+        row=0, column=1, sticky="w"
+    )
+    ctk.CTkLabel(header, text="Turn German text into a voice message", font=font(13), text_color=MUTED, anchor="w", height=20).grid(
+        row=1, column=1, sticky="w"
+    )
+
+    text_card = card(1, expand=True)
+    text_card.grid_columnconfigure(0, weight=1)
+    text_card.grid_rowconfigure(1, weight=1)
+    field_title(text_card, "YOUR TEXT").grid(row=0, column=0, sticky="w", padx=16, pady=(10, 2))
+    text_box = ctk.CTkTextbox(text_card, wrap="word", font=font(15), fg_color=FIELD, text_color=TEXT, corner_radius=10, height=120)
+    text_box.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
     text_box.insert("1.0", FIRST_TEXT)
+
+    tips_card = card(2)
+    tips_card.grid_columnconfigure(1, weight=1)
+    tips_title = field_title(tips_card, "")
+    tips_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 2))
+    tip_values = []
+    for row, (title, _) in enumerate(voice_tips(next(iter(VOICES))), start=1):
+        last_pad = 10 if row == 5 else 1
+        ctk.CTkLabel(tips_card, text=title, font=font(12, "bold"), text_color=TEXT, anchor="nw", height=18).grid(
+            row=row, column=0, sticky="nw", padx=(16, 10), pady=(0, last_pad)
+        )
+        value = ctk.CTkLabel(tips_card, text="", font=font(12), text_color=MUTED, anchor="nw", justify="left", wraplength=500, height=18)
+        value.grid(row=row, column=1, sticky="nw", padx=(0, 14), pady=(0, last_pad))
+        tip_values.append(value)
+
+    def show_tips(voice):
+        tips_title.configure(text=f"TIPS FOR {voice.upper()}")
+        for label, (_, text) in zip(tip_values, voice_tips(voice)):
+            label.configure(text=text)
+
+    settings = card(3)
+    settings.grid_columnconfigure((0, 1, 2), weight=1, uniform="settings")
+    field_title(settings, "Voice").grid(row=0, column=0, sticky="w", padx=(16, 6), pady=(8, 0))
+    field_title(settings, "Output audio name").grid(row=0, column=1, sticky="w", padx=6, pady=(8, 0))
+    field_title(settings, "Output text name").grid(row=0, column=2, sticky="w", padx=(6, 16), pady=(8, 0))
+    voice_box = ctk.CTkOptionMenu(
+        settings, values=list(VOICES), command=show_tips, font=font(14), dropdown_font=font(14), height=36, corner_radius=10,
+        fg_color=FIELD, text_color=TEXT, button_color=FIELD, button_hover_color=BORDER,
+        dropdown_fg_color=CARD, dropdown_text_color=TEXT, dropdown_hover_color=BORDER,
+    )
+    voice_box.grid(row=1, column=0, sticky="ew", padx=(14, 6), pady=(0, 14))
+
+    def name_field(column, value, padx):
+        box = ctk.CTkEntry(settings, font=font(14), height=36, corner_radius=10, fg_color=FIELD, text_color=TEXT, border_color=BORDER)
+        box.insert(0, value)
+        box.grid(row=1, column=column, sticky="ew", padx=padx, pady=(0, 14))
+        return box
+
+    audio_name_box = name_field(1, DEFAULT_AUDIO_NAME, 6)
+    text_name_box = name_field(2, DEFAULT_TEXT_NAME, (6, 14))
+
+    actions = ctk.CTkFrame(root, fg_color="transparent")
+    actions.grid(row=4, column=0, sticky="ew", padx=20)
+    actions.grid_columnconfigure(0, weight=1)
+    run_button = ctk.CTkButton(
+        actions, text="Run", font=font(16, "bold"), height=46, corner_radius=12, fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="white",
+    )
+    run_button.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+    play_button = ctk.CTkButton(
+        actions, text="Play", font=font(16), width=120, height=46, corner_radius=12, state="disabled", fg_color="transparent",
+        hover_color=BORDER, border_width=1, border_color=BORDER, text_color=TEXT, text_color_disabled=MUTED,
+    )
+    play_button.grid(row=0, column=1)
+    # yandex_button = ctk.CTkButton(actions, text="Add Yandex API", font=font(14), height=46, corner_radius=12)
+    # yandex_button.grid(row=0, column=2, padx=(10, 0))
+
+    progress = ctk.CTkProgressBar(root, mode="indeterminate", height=4, progress_color=ACCENT, fg_color=BORDER)
+    progress.grid(row=5, column=0, sticky="ew", padx=20, pady=(10, 0))
+    progress.grid_remove()
+    status_label = ctk.CTkLabel(root, font=font(13), anchor="w", justify="left", wraplength=610, height=22)
+    status_label.grid(row=6, column=0, sticky="ew", padx=22, pady=(8, 14))
+
+    def status(text, color=MUTED):
+        status_label.configure(text=text, text_color=color)
+
+    def busy(active):
+        run_button.configure(state="disabled" if active else "normal", text="Creating audio..." if active else "Run")
+        if active:
+            progress.grid()
+            progress.start()
+        else:
+            progress.stop()
+            progress.grid_remove()
+
+    show_tips(voice_box.get())
+    status("Enter German text and press Run.")
 
     def finish(result, text_path, error):
         nonlocal last_file
-        run_button.config(state="normal")
+        busy(False)
         if error:
             message = "Could not create audio. Check your internet and try again."
             if isinstance(error, PermissionError):
                 message = "Could not overwrite the file. Close it in your player and try again."
-            # status.config(text=str(error) if isinstance(error, YandexError) else message)
-            status.config(text=message)
+            # message = str(error) if isinstance(error, YandexError) else message
+            status(message, ERROR)
             return
         last_file, service = result
-        play_button.config(state="normal")
-        status.config(text=f"Saved: {last_file.name} and {text_path.name} in the output folder ({service} voice)")
+        play_button.configure(state="normal")
+        status(f"Saved: {last_file.name} and {text_path.name} in the output folder ({service} voice)", SUCCESS)
 
     def work(text, voice, audio_path, text_path):
         log(f"Run: voice={voice}, characters={len(text)}, audio={audio_path.name}, text={text_path.name}")
@@ -210,7 +306,7 @@ def main():
         """Return a file path from a name field, or None if the name can't be used."""
         name = name_box.get().strip().removesuffix(suffix)
         if not name or any(c in name for c in r'\/:*?"<>|'):
-            status.config(text=r'Please enter a file name without \ / : * ? " < > |')
+            status(r'Please enter a file name without \ / : * ? " < > |', ERROR)
             return None
         return OUTPUT_DIR / f"{name}{suffix}"
 
@@ -228,24 +324,24 @@ def main():
     def create():
         text = text_box.get("1.0", "end").strip()
         if not text:
-            status.config(text="Please enter some text first.")
+            status("Please enter some text first.", ERROR)
             return
         voice = VOICES[voice_box.get()]
         # if voice == YANDEX_VOICE and not load_yandex_key():
-            # status.config(text="Please press Add Yandex API first.")
+            # status("Please press Add Yandex API first.", ERROR)
             # return
         # if voice == YANDEX_VOICE and len(text) > YANDEX_MAX_CHARS:
-            # status.config(text=f"Yandex allows {YANDEX_MAX_CHARS} characters. Your text has {len(text)}.")
+            # status(f"Yandex allows {YANDEX_MAX_CHARS} characters. Your text has {len(text)}.", ERROR)
             # return
         audio_path = output_path(audio_name_box, ".mp3")
         text_path = audio_path and output_path(text_name_box, ".txt")
         if not text_path:
             return
         if not overwrite_allowed([audio_path, text_path]):
-            status.config(text="Nothing was changed.")
+            status("Nothing was changed.")
             return
-        run_button.config(state="disabled")
-        status.config(text="Creating audio...")
+        busy(True)
+        status("Creating audio...")
         threading.Thread(target=work, args=(text, voice, audio_path, text_path), daemon=True).start()
 
     # def add_yandex_key():
@@ -253,11 +349,11 @@ def main():
         # if key and key.strip():
             # save_yandex_key(key.strip())
             # log("Yandex API key saved")
-            # status.config(text="Yandex API key saved on this computer only.")
+            # status("Yandex API key saved on this computer only.", SUCCESS)
 
-    run_button.config(command=create)
-    # yandex_button.config(command=add_yandex_key)
-    play_button.config(command=lambda: os.startfile(last_file))
+    run_button.configure(command=create)
+    # yandex_button.configure(command=add_yandex_key)
+    play_button.configure(command=lambda: os.startfile(last_file))
     root.mainloop()
 
 
