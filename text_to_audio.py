@@ -329,14 +329,24 @@ def main():
     )
     voice_box.grid(row=1, column=0, sticky="ew", padx=(14, 6), pady=(0, 14))
 
-    def name_field(column, value, padx):
-        box = ctk.CTkEntry(settings, font=font(14), height=36, corner_radius=10, fg_color=FIELD, text_color=TEXT, border_color=BORDER)
-        box.insert(0, value)
+    def name_field(column, name, padx):
+        box = ctk.CTkEntry(
+            settings, textvariable=name, font=font(14), height=36, corner_radius=10, fg_color=FIELD, text_color=TEXT, border_color=BORDER,
+        )
         box.grid(row=1, column=column, sticky="ew", padx=padx, pady=(0, 14))
         return box
 
-    audio_name_box = name_field(1, DEFAULT_AUDIO_NAME, 6)
-    text_name_box = name_field(2, DEFAULT_TEXT_NAME, 6)
+    def copy_name(source, target):
+        if target.get() != source.get():
+            target.set(source.get())
+
+    audio_name = ctk.StringVar(value=DEFAULT_AUDIO_NAME)
+    text_name = ctk.StringVar(value=DEFAULT_TEXT_NAME)
+    audio_name_box = name_field(1, audio_name, 6)
+    text_name_box = name_field(2, text_name, 6)
+    # Changing one output name changes the other one too
+    audio_name.trace_add("write", lambda *_: copy_name(audio_name, text_name))
+    text_name.trace_add("write", lambda *_: copy_name(text_name, audio_name))
     folder_image = ctk.CTkImage(
         Image.open(ASSETS_DIR / "folder_light.png"), Image.open(ASSETS_DIR / "folder_dark.png"), size=(20, 20)
     )
@@ -578,7 +588,7 @@ def main():
 
     def output_path(name_box, suffix):
         """Return a file path from a name field, or None if the name can't be used."""
-        name = name_box.get().strip().removesuffix(suffix)
+        name = name_box.get().strip().removesuffix(".mp3").removesuffix(".txt")
         if not name or any(c in name for c in r'\/:*?"<>|'):
             status(r'Please enter a file name without \ / : * ? " < > |', ERROR)
             return None

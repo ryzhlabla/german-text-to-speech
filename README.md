@@ -7,7 +7,7 @@ A small Windows app that turns German text into a voice message. Type your text,
 1. Double-click `German Text to Speech.exe`. It needs an internet connection, but no Python.
 2. Type or paste your German text.
 3. Choose a voice: Katja, Amala, Conrad or Killian.
-4. Enter the output names. The defaults are `audio` and `text`.
+4. Enter an output name. The defaults are `audio` and `text`. When you change one name, the other one changes to match.
 5. Press **Run**, then **Play** to listen inside the app. Press **Stop** to stop.
 
 The app follows the light or dark mode of Windows.
