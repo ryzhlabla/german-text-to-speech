@@ -27,7 +27,7 @@ The first time, the app asks for:
 - **Bot token:** create a bot with [@BotFather](https://t.me/BotFather) and paste its token.
 - **Channel or chat:** for a channel, add the bot as an admin and enter `@channelname`. For your own chat, leave it empty and send your bot any message first.
 
-These are saved in `telegram_settings.json`, one folder above this project, so they are not in git. If that folder is inside OneDrive, OneDrive also copies the file to the cloud. The token is stored as plain text, so don't share that file. To change the settings, delete that file. The app also asks again if Telegram rejects them.
+These are saved in `telegram_settings.json`, one folder above this project, so they are not in git. If that folder is inside OneDrive, OneDrive also copies the file to the cloud. The token is stored as plain text, so don't share that file. To change the settings, right-click the Telegram button. The app also asks again if Telegram rejects them.
 
 ## Yandex voice (switched off)
 

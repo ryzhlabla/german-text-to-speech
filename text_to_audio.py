@@ -34,6 +34,7 @@ TELEGRAM_FILE = APP_DIR.parent / "telegram_settings.json"
 TELEGRAM_URL = "https://api.telegram.org"
 TELEGRAM_TRIES = 3
 CAPTION_WORDS = 5
+TELEGRAM_HINT = "Click to send. Right-click to change Telegram settings."
 # Yandex is switched off for now. To restore it, uncomment every Yandex line in this file
 # # The key stays one folder above this project, so it is outside git
 # KEY_FILE = APP_DIR.parent / "yandex_api_key.txt"
@@ -265,6 +266,7 @@ def main():
     last_file = None
     last_text = ""
     playing = False
+    current_status = ("", MUTED)
 
     def font(size, weight="normal"):
         return ctk.CTkFont(family="Segoe UI", size=size, weight=weight)
@@ -372,6 +374,8 @@ def main():
     status_label.grid(row=6, column=0, sticky="ew", padx=22, pady=(8, 14))
 
     def status(text, color=MUTED):
+        nonlocal current_status
+        current_status = (text, color)
         status_label.configure(text=text, text_color=color)
 
     def busy(active):
@@ -429,7 +433,15 @@ def main():
             dialog, text="Save", font=font(14, "bold"), height=38, corner_radius=10, fg_color=ACCENT, hover_color=ACCENT_HOVER,
             text_color="white", command=save,
         ).grid(row=6, column=1, sticky="e", padx=(0, 20), pady=(16, 16))
-        dialog.after(150, lambda: (dialog.lift(), dialog.focus_force(), token_box.focus(), dialog.grab_set()))
+
+        def focus_dialog():
+            if dialog.winfo_exists():
+                dialog.lift()
+                dialog.focus_force()
+                token_box.focus()
+                dialog.grab_set()
+
+        dialog.after(150, focus_dialog)
         root.wait_window(dialog)
         if not saved:
             return None
@@ -458,6 +470,24 @@ def main():
             log(f"Telegram failed: {type(e).__name__}")
             error = TelegramError("Could not send the audio to Telegram.")
         root.after(0, telegram_done, audio_path, error)
+
+    def show_telegram_hint(_):
+        # Closing a window can also trigger this, so check that the mouse is really on the button
+        under_mouse = root.winfo_containing(*root.winfo_pointerxy())
+        if telegram_button.cget("state") == "normal" and str(under_mouse).startswith(str(telegram_button)):
+            status_label.configure(text=TELEGRAM_HINT, text_color=MUTED)
+
+    def hide_telegram_hint(_):
+        text, color = current_status
+        status_label.configure(text=text, text_color=color)
+
+    def change_telegram_settings(_):
+        if telegram_button.cget("state") == "normal":
+            telegram_button.configure(state="disabled")
+            saved = ask_telegram_settings(load_telegram_settings())
+            telegram_button.configure(state="normal")
+            if saved:
+                status("Telegram settings saved.", SUCCESS)
 
     def telegram_click():
         if not last_file or not last_file.exists():
@@ -601,6 +631,9 @@ def main():
     play_button.configure(command=toggle_audio)
     folder_button.configure(command=open_output_folder)
     telegram_button.configure(command=telegram_click)
+    telegram_button.bind("<Button-3>", change_telegram_settings)
+    telegram_button.bind("<Enter>", show_telegram_hint)
+    telegram_button.bind("<Leave>", hide_telegram_hint)
     root.mainloop()
 
 
